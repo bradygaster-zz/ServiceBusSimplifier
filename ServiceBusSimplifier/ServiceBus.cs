@@ -17,8 +17,9 @@ namespace ServiceBusSimplifier
 		TokenProvider _tokenProvider;
 		Uri _serviceUri;
 		List<Tuple<string, SubscriptionClient>> _subscribers;
+	    private ReceiveMode _receiveMode;
 
-		private ServiceBus()
+	    private ServiceBus()
 		{
 			_subscribers = new List<Tuple<string, SubscriptionClient>>();
 		}
@@ -46,8 +47,9 @@ namespace ServiceBusSimplifier
 			return ret;
 		}
 
-		public ServiceBus Subscribe<T>(Action<T> receiveHandler)
+		public ServiceBus Subscribe<T>(Action<T> receiveHandler, ReceiveMode receiveMode = ReceiveMode.ReceiveAndDelete)
 		{
+		    _receiveMode = receiveMode;
 			SetupServiceBusEnvironment();
 			var topicName = string.Format("Topic_{0}", typeof(T).Name);
 			var subscriptionName = string.Format("Subscription_{0}", typeof(T).Name);
@@ -64,7 +66,7 @@ namespace ServiceBusSimplifier
 			else
 				subscription = _namespaceManager.GetSubscription(topic.Path, subscriptionName);
 
-			var subscriptionClient = _messagingFactory.CreateSubscriptionClient(topicName, subscriptionName, ReceiveMode.ReceiveAndDelete);
+			var subscriptionClient = _messagingFactory.CreateSubscriptionClient(topicName, subscriptionName, receiveMode);
 
 			_subscribers.Add(new Tuple<string, SubscriptionClient>(topicName, subscriptionClient));
 
@@ -83,14 +85,38 @@ namespace ServiceBusSimplifier
 					if (brokeredMessage != null)
 					{
 						var messageData = brokeredMessage.GetBody<T>();
-						receiveHandler(messageData);
+					    try
+					    {
+                            receiveHandler(messageData);
+                            
+                            if (_receiveMode == ReceiveMode.PeekLock)
+                            {
+                                brokeredMessage.BeginComplete((result) =>
+                                                                  {
+                                                                      var m = result.AsyncState as BrokeredMessage;
+                                                                      if (m != null) m.EndComplete(result);
+                                                                  }, brokeredMessage);
+                            }
+					    }
+					    catch (Exception)
+					    {
+                            // TODO: what happens if this loops?
+					        if (_receiveMode == ReceiveMode.PeekLock)
+					        {
+                                brokeredMessage.BeginAbandon((result) =>
+                                                                 {
+                                                                     var m = result.AsyncState as BrokeredMessage;
+                                                                     if (m != null) m.EndAbandon(result);
+                                                                 }, brokeredMessage);
+					        }
+					    }
 						Begin<T>(receiveHandler, subscriptionClient);
 					}
 				},
 				null);
 		}
 
-		public ServiceBus Publish<T>(T message)
+	    public ServiceBus Publish<T>(T message)
 		{
 			SetupServiceBusEnvironment();
 			var topicName = string.Format("Topic_{0}", typeof(T).Name);
