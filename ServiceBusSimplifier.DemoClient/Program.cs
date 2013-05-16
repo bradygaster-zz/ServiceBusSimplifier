@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
+using Microsoft.ServiceBus.Messaging;
 
 namespace ServiceBusSimplifier.DemoClient
 {
@@ -18,7 +19,7 @@ namespace ServiceBusSimplifier.DemoClient
 						IssuerKey = "YOUR KEY"
 					})
 				.ClearTopics()
-				.Subscribe<SimpleMessage>(HandleSimpleMessage);
+				.Subscribe<SimpleMessage>(HandleSimpleMessage, ReceiveMode.ReceiveAndDelete);
 
 			Console.Write("Message: ");
 			var message = Console.ReadLine();
